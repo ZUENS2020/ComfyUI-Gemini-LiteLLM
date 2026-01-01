@@ -18,7 +18,7 @@ import urllib.request
 import urllib.error
 import urllib.parse
 import ssl
-import re
+import ipaddress
 from typing import Any
 from io import BytesIO
 import numpy as np
@@ -51,17 +51,23 @@ def _normalize_url(url: str) -> str:
         hostname = parsed.hostname
         if hostname:
             hostname_lower = hostname.lower()
-            # 禁止 localhost 和内网 IP
-            if hostname_lower in ["localhost", "127.0.0.1", "0.0.0.0", "::1"]:
+            # 禁止 localhost
+            if hostname_lower in ["localhost", "::1"]:
                 raise ValueError("禁止访问本地地址")
-            # 禁止内网 IP 段
-            if hostname_lower.startswith(("10.", "172.16.", "172.17.", "172.18.", "172.19.", 
-                                         "172.20.", "172.21.", "172.22.", "172.23.", "172.24.",
-                                         "172.25.", "172.26.", "172.27.", "172.28.", "172.29.",
-                                         "172.30.", "172.31.", "192.168.")):
-                raise ValueError("禁止访问内网地址")
+            
+            # 尝试解析为 IP 地址并检查是否为私有地址
+            try:
+                ip = ipaddress.ip_address(hostname_lower)
+                if ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved:
+                    raise ValueError("禁止访问内网地址")
+            except ValueError:
+                # 不是 IP 地址，可能是域名，继续
+                pass
         
         return url
+    except ValueError as e:
+        _log(f"URL 验证失败: {e}")
+        raise
     except Exception as e:
         _log(f"URL 验证失败: {e}")
         raise ValueError(f"无效的 URL: {e}")
@@ -132,8 +138,13 @@ def _request(method: str, url: str, headers: dict, data: dict = None, timeout: i
         with urllib.request.urlopen(req, timeout=timeout, context=ssl_context) as r:
             # 限制响应大小（50MB）
             content_length = r.getheader('Content-Length')
-            if content_length and int(content_length) > 50 * 1024 * 1024:
-                raise Exception("响应数据过大（超过 50MB）")
+            if content_length:
+                try:
+                    size = int(content_length)
+                    if size > 50 * 1024 * 1024:
+                        raise Exception("响应数据过大（超过 50MB）")
+                except ValueError:
+                    _log("警告: Content-Length 头无效")
             
             response_data = r.read()
             if len(response_data) > 50 * 1024 * 1024:
@@ -163,14 +174,34 @@ def _request(method: str, url: str, headers: dict, data: dict = None, timeout: i
 def _download(url: str) -> bytes:
     """下载二进制数据 - 增强安全性"""
     # 验证 URL
-    if not url or not url.startswith(("https://", "http://", "data:")):
-        raise ValueError("无效的下载 URL")
+    if not url:
+        raise ValueError("下载 URL 为空")
     
     # 如果是 data URL，直接解码
     if url.startswith("data:"):
         if "base64," in url:
-            return base64.b64decode(url.split("base64,", 1)[1])
+            b64_data = url.split("base64,", 1)[1]
+            # 限制 base64 数据大小（约 133MB 编码后）防止内存耗尽
+            if len(b64_data) > 133 * 1024 * 1024:
+                raise ValueError("Base64 数据过大（超过 133MB）")
+            try:
+                decoded = base64.b64decode(b64_data)
+                if len(decoded) > 100 * 1024 * 1024:
+                    raise ValueError("解码后文件过大（超过 100MB）")
+                return decoded
+            except Exception as e:
+                raise ValueError(f"Base64 解码失败: {e}")
         raise ValueError("不支持的 data URL 格式")
+    
+    # 对于 http/https URL，使用 _normalize_url 验证
+    if url.startswith(("https://", "http://")):
+        try:
+            # 验证 URL 防止 SSRF
+            _normalize_url(url)
+        except ValueError as e:
+            raise ValueError(f"URL 验证失败: {e}")
+    else:
+        raise ValueError("无效的下载 URL 协议")
     
     req = urllib.request.Request(url, headers={"User-Agent": "ComfyUI"})
     
@@ -182,8 +213,13 @@ def _download(url: str) -> bytes:
     with urllib.request.urlopen(req, timeout=60, context=ssl_context) as r:
         # 限制下载大小（100MB）
         content_length = r.getheader('Content-Length')
-        if content_length and int(content_length) > 100 * 1024 * 1024:
-            raise Exception("文件过大（超过 100MB）")
+        if content_length:
+            try:
+                size = int(content_length)
+                if size > 100 * 1024 * 1024:
+                    raise Exception("文件过大（超过 100MB）")
+            except ValueError:
+                _log("警告: Content-Length 头无效")
         
         data = r.read()
         if len(data) > 100 * 1024 * 1024:
