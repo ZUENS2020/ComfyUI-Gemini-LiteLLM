@@ -188,6 +188,11 @@ class LLMImageGenerate:
                 message = res["choices"][0].get("message", {})
                 images = message.get("images", [])
                 
+                # 检查是否返回了文本而不是图片
+                if not images and message.get("content"):
+                    _log(f"Image error: Gemini returned text instead of image. Content preview: {message['content'][:200]}...")
+                    raise Exception("Gemini returned text response instead of image. Try using a simpler, more direct image description prompt.")
+                
                 for img_item in images:
                     img_url = img_item.get("image_url", {}).get("url", "")
                     if img_url.startswith("data:image/"):
