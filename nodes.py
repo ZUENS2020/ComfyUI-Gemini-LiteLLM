@@ -101,7 +101,6 @@ class LLMChatGenerate:
         max_tokens = config.get("max_tokens", 2000)
         
         base = _normalize_url(api_base)
-        _log(f"Chat start | base={base} | model={model} | key={_safe_key(api_key)}")
         if not base or not api_key or not model:
             _log("Chat error: missing base/key/model")
             return ("Error: Missing parameters",)
@@ -118,10 +117,8 @@ class LLMChatGenerate:
                 "temperature": temperature,
                 "max_tokens": max_tokens
             }
-            _log(f"Chat request -> {base}/chat/completions | temp={temperature} max_tokens={max_tokens}")
             res = _request("POST", f"{base}/chat/completions", _headers(api_key), payload)
             txt = res.get("choices", [{}])[0].get("message", {}).get("content", "")
-            _log(f"Chat done | output_len={len(txt)}")
             return (txt or "No response",)
         except Exception as e:
             _log(f"Chat exception: {e}")
@@ -161,7 +158,6 @@ class LLMImageGenerate:
         image_size = config.get("image_size")
         
         base = _normalize_url(api_base)
-        _log(f"Image start | base={base} | model={model} | key={_safe_key(api_key)}")
         if not base or not api_key or not model:
             _log("Image error: missing base/key/model")
             return (self._err(),)
@@ -169,8 +165,6 @@ class LLMImageGenerate:
         try:
             if use_gemini_image and aspect_ratio and image_size:
                 # Gemini 图片生成 (使用 chat/completions 端点)
-                _log(f"Gemini image config: size={image_size} ratio={aspect_ratio}")
-                
                 payload = {
                     "model": model,
                     "messages": [{"role": "user", "content": prompt}],
@@ -180,7 +174,6 @@ class LLMImageGenerate:
                     }
                 }
                 
-                _log(f"Image request -> {base}/chat/completions | Gemini image_config")
                 res = _request("POST", f"{base}/chat/completions", _headers(api_key), payload, timeout=180)
                 
                 if "error" in res:
@@ -193,8 +186,6 @@ class LLMImageGenerate:
                 message = res["choices"][0].get("message", {})
                 images = message.get("images", [])
                 
-                _log(f"Image response images_count={len(images)}")
-                
                 for img_item in images:
                     img_url = img_item.get("image_url", {}).get("url", "")
                     if img_url.startswith("data:image/"):
@@ -206,7 +197,6 @@ class LLMImageGenerate:
                         imgs.append(torch.from_numpy(arr))
                 
                 if imgs:
-                    _log(f"Image done | batch={len(imgs)} | shape={list(imgs[0].shape) if imgs else 'n/a'}")
                     return (torch.stack(imgs),)
                     
             else:
@@ -220,14 +210,11 @@ class LLMImageGenerate:
                     "response_format": "b64_json"
                 }
                 
-                _log(f"Image request -> {base}/images/generations | model={model} size={size} n={n}")
-                
                 res = _request("POST", f"{base}/images/generations", _headers(api_key), payload, timeout=180)
             if "error" in res:
                 raise Exception(res.get("error", {}).get("message", "image generation failed"))
             if not res.get("data"):
                 raise Exception(f"empty response: {res}")
-            _log(f"Image response data_count={len(res.get('data', []))}")
             
             imgs = []
             for item in res.get("data", []):
@@ -243,7 +230,6 @@ class LLMImageGenerate:
                     imgs.append(torch.from_numpy(arr))
             
             if imgs:
-                _log(f"Image done | batch={len(imgs)} | shape={list(imgs[0].shape) if imgs else 'n/a'}")
                 return (torch.stack(imgs),)
             
             _log("Image error: no decoded images")
