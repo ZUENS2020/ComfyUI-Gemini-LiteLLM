@@ -148,6 +148,7 @@ class LLMImageGenerate:
         api_key = config.get("api_key")
         model = config.get("model")
         use_gemini_image = config.get("use_gemini_image", False)
+        temperature = config.get("temperature", 1.0)
         
         # OpenAI 参数
         size = config.get("size", "1024x1024")
@@ -168,6 +169,7 @@ class LLMImageGenerate:
                 payload = {
                     "model": model,
                     "messages": [{"role": "user", "content": prompt}],
+                    "temperature": temperature,
                     "image_config": {
                         "image_size": image_size,
                         "aspect_ratio": aspect_ratio
@@ -334,6 +336,7 @@ class GeminiImageParams:
                 "base_config": ("LLM_BASE_CONFIG",),
                 "aspect_ratio": (["1:1", "16:9", "4:3", "9:16", "3:4"], ),
                 "image_size": (["1K", "2K", "4K"], ),
+                "temperature": ("FLOAT", {"default": 1.0, "min": 0, "max": 1, "step": 0.05}),
             }
         }
     
@@ -342,11 +345,12 @@ class GeminiImageParams:
     FUNCTION = "run"
     CATEGORY = "LLM/Config"
     
-    def run(self, base_config, aspect_ratio, image_size):
+    def run(self, base_config, aspect_ratio, image_size, temperature):
         return ({
             **base_config,
             "aspect_ratio": aspect_ratio,
             "image_size": image_size,
+            "temperature": temperature,
             "use_gemini_image": True,  # 标记使用 Gemini 图片生成
         },)
 
