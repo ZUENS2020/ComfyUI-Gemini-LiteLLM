@@ -1,17 +1,15 @@
-# ComfyUI LLM Custom Nodes
+# ComfyUI Gemini LiteLLM Nodes
 
-ComfyUI 的 LLM 集成插件，支持聊天和图片生成功能。
+仅支持通过 LiteLLM 的 Gemini（聊天 + 图片，多模态，多图参考）。
 
 ## 功能特性
 
-- ✅ 聊天对话（Chat Completions）
-- ✅ 图片生成（Image Generation）
-- ✅ 支持 OpenAI / LiteLLM 代理
-- ✅ 支持 Gemini 3 图片生成（精确控制分辨率和宽高比）
-- ✅ 支持多模态输入（图片 + 文本生成新图片）
-- ✅ Temperature 控制（Gemini 图片生成）
-- ✅ 零外部依赖（仅使用 Python 标准库 urllib）
-- ✅ 精简日志输出（仅显示错误信息）
+- ✅ 聊天对话（Gemini 3 via LiteLLM）
+- ✅ 图片生成（Gemini 3 via LiteLLM，image_config 控制分辨率/宽高比）
+- ✅ 多模态输入：多张参考图 + 文本
+- ✅ Temperature 控制（0-1）
+- ✅ 零外部依赖（仅 urllib）
+- ✅ 精简日志（仅错误）
 
 ## 节点列表
 
@@ -20,9 +18,9 @@ ComfyUI 的 LLM 集成插件，支持聊天和图片生成功能。
 | 节点名称 | 功能 | 输入 | 输出 |
 |---------|------|------|------|
 | Chat | 聊天对话 | config, prompt, system | text |
-| Image | 图片生成 | config, prompt, n, [image], [additional_text] | image |
+| Image | 图片生成 | config, prompt, n, [image_1..image_5], [additional_text] | image |
 
-**说明：** `[image]` 和 `[additional_text]` 为可选输入，支持多模态生成。
+**说明：** `[image_1..image_5]` 和 `[additional_text]` 为可选输入，支持多模态生成。
 
 ### 配置节点
 
@@ -30,7 +28,6 @@ ComfyUI 的 LLM 集成插件，支持聊天和图片生成功能。
 |---------|------|------|
 | Base Config | 基础配置 | API地址、密钥、模型 |
 | Chat Params | 聊天参数 | temperature、max_tokens |
-| OpenAI Image | OpenAI图片参数 | size、quality |
 | Gemini Image | Gemini图片参数 | aspect_ratio、image_size、temperature |
 
 ## 使用方法
@@ -45,31 +42,12 @@ Base Config → Chat Params → Chat
 ```
 
 **配置示例：**
-- api_base: `https://api.openai.com/v1`
-- model: `gpt-3.5-turbo`
+- api_base: `https://your-litellm-server.com/v1`
+- model: `gemini/gemini-1.5-pro`
 - temperature: `0.7`
 - max_tokens: `2000`
 
-### 2. OpenAI 图片生成
-
-> **⚠️ 注意 / Note:**  
-> OpenAI 图片编辑功能（使用输入图像）的支持尚不完善，可能存在兼容性问题。建议优先使用 Gemini 的多模态功能。  
-> *OpenAI image editing support (with input images) is not fully tested and may have compatibility issues. We recommend using Gemini's multimodal features instead.*
-
-**工作流：**
-```
-Base Config → OpenAI Image → Image
-                              ↑
-                            prompt
-```
-
-**配置示例：**
-- api_base: `https://api.openai.com/v1`
-- model: `dall-e-3`
-- size: `1024x1024`
-- quality: `standard`
-
-### 3. Gemini 图片生成（通过 LiteLLM）
+### 2. Gemini 图片生成（通过 LiteLLM）
 
 **工作流：**
 ```
@@ -85,7 +63,11 @@ Base Config → Gemini Image → Image
 - image_size: `2K`
 - temperature: `0.5` (可选，范围 0-1，控制生成的随机性)
 
-### 4. Gemini 多模态图片生成（图像 + 文本）
+**多模态（多图）支持：**
+- 可接入多张参考图（image_1..image_5；或批次展开的多帧将全部发送给 Gemini）
+- prompt + additional_text 与所有参考图一起构建消息
+
+### 3. Gemini 多模态图片生成（图像 + 文本）
 
 **工作流：**
 ```
@@ -132,7 +114,7 @@ Base Config → Gemini Image → Image
 | 0.5 | 平衡创造性和稳定性 | 通用推荐 |
 | 1.0 | 最大随机性，结果多样化 | 探索创意方案 |
 
-**注意：** Temperature 参数仅对 Gemini 图片生成有效，OpenAI 图片 API 不支持此参数。
+**注意：** Temperature 参数仅对 Gemini 图片生成有效。
 
 ### 实际输出尺寸对照表
 
@@ -215,17 +197,7 @@ Gemini 图片生成通过 LiteLLM 时使用 Chat Completions 端点，这是因�
 - ✅ 2K + 9:16 → 1536×2752
 - ✅ 4K + 1:1 → 4096×4096
 
-## API 兼容性
-
-### OpenAI 标准 API
-
-| 项目 | 值 |
-|------|-----|
-| 端点 | `/images/generations` |
-| 参数 | `prompt`, `size`, `quality`, `n` |
-| 响应 | `data[].b64_json` 或 `data[].url` |
-
-### Gemini（通过 LiteLLM）
+## API 兼容性（Gemini via LiteLLM）
 
 | 项目 | 值 |
 |------|-----|
@@ -248,19 +220,6 @@ Gemini 图片生成通过 LiteLLM 时使用 Chat Completions 端点，这是因�
 
 **A:** 任何支持 LiteLLM v1.80.7+ 的代理服务器，前提是代理正确转发 `image_config` 参数到 Gemini 后端。
 
-### Q: OpenAI 和 Gemini 可以用同一个 Base Config 吗？
-
-**A:** 不建议。虽然理论上可以，但它们使用不同的端点和参数格式：
-- OpenAI: `/images/generations` + `prompt`/`size`
-- Gemini: `/chat/completions` + `messages`/`image_config`
-
-### Q: 为什么测试时返回 1408×768？
-
-**A:** 如果使用错误的端点或参数格式，LiteLLM 会回退到默认尺寸。确保：
-1. 使用 `/chat/completions` 端点
-2. 传递 `image_config` 参数
-3. LiteLLM 版本 ≥ 1.80.7
-
 ### Q: 为什么 Gemini 返回文本而不是图片？
 
 **A:** 这通常发生在提示词过于复杂或像是在"询问问题"而非"描述图像"时。解决方法：
@@ -276,17 +235,7 @@ Gemini 图片生成通过 LiteLLM 时使用 Chat Completions 端点，这是因�
 3. （可选）在 additional_text 中添加额外说明
 4. 节点会自动构建多模态消息发送给 Gemini
 
-**注意：** OpenAI 的图像编辑功能（/images/edits）支持尚不完善，建议使用 Gemini。
 
-### Q: OpenAI 和 Gemini 的多模态有什么区别？
-
-**A:** 
-- **Gemini**: 使用 `/chat/completions` 端点，支持在单个消息中混合文本和图像，功能更强大且经过充分测试。
-- **OpenAI**: 使用 `/images/edits` 端点，需要 multipart/form-data 格式，仅支持 DALL-E-2 和 GPT 图像模型，**当前实现可能存在兼容性问题**。
-
-*Difference between OpenAI and Gemini multimodal:*
-- *Gemini: Uses `/chat/completions`, supports mixed text and images in a single message, fully tested.*
-- *OpenAI: Uses `/images/edits`, requires multipart/form-data format, only supports DALL-E-2 and GPT image models. **Current implementation may have compatibility issues.***
 
 ## 开发说明
 
@@ -298,7 +247,7 @@ Gemini 图片生成通过 LiteLLM 时使用 Chat Completions 端点，这是因�
 ### 目录结构
 
 ```
-ComfyUI-OpenAI-Custom/
+ComfyUI-Gemini-LiteLLM/
 ├── __init__.py       # 插件入口
 ├── nodes.py          # 节点实现
 └── README.md         # 本文档
@@ -307,13 +256,12 @@ ComfyUI-OpenAI-Custom/
 ### 代码架构
 
 **执行节点：**
-- `LLMChatGenerate` - 聊天对话执行
-- `LLMImageGenerate` - 图片生成执行（支持 OpenAI 和 Gemini，支持多模态输入）
+- `LLMChatGenerate` - 聊天对话执行（Gemini 经 LiteLLM）
+- `LLMImageGenerate` - 图片生成执行（Gemini，多模态，多张参考图）
 
 **配置节点：**
 - `LLMBaseConfig` - 基础配置（api_base, api_key, model）
 - `ChatParams` - 聊天参数（base_config + temperature, max_tokens）
-- `OpenAIImageParams` - OpenAI 图片参数（base_config + size, quality）
 - `GeminiImageParams` - Gemini 图片参数（base_config + aspect_ratio, image_size, temperature）
 
 **工具函数：**
@@ -326,30 +274,29 @@ ComfyUI-OpenAI-Custom/
 
 ## 更新日志
 
+### v3.0.0 (2026-01-02)
+
+- ✅ 移除 OpenAI 支持，聚焦 LiteLLM Gemini（聊天 + 图片）
+- ✅ Image 节点支持多张不同尺寸参考图（多模态）
+- ✅ 默认配置改为 LiteLLM + Gemini 模型
+- ✅ 文档更新为 Gemini-only
+
 ### v2.1.0 (2026-01-02)
 
-- ✅ **新功能：** 支持多模态图片生成（图像 + 文本输入）
-- ✅ **新功能：** Gemini 图片生成添加 temperature 参数（0-1 范围）
-- ✅ **优化：** 精简日志输出，仅显示错误信息
-- ✅ **优化：** 改进错误提示，当 Gemini 返回文本时给出明确提示
-- ✅ **文档：** 更新 README 添加多模态使用说明
-- ✅ **安全：** 移除文档中的个人信息示例
+- 支持多模态图片生成（图像 + 文本输入）
+- Gemini 图片生成添加 temperature 参数（0-1）
+- 精简日志，仅错误
+- 改进错误提示，当 Gemini 返回文本时给出提示
+- 文档：多模态说明
+- 安全：移除文档中的个人信息示例
 
-### v2.0.0 (2026-01-02)
+### v2.0.0
 
-- ✅ **重大更新：** 修复 Gemini 图片生成参数格式
-- ✅ 使用 `/chat/completions` 端点代替 `/images/generations`
-- ✅ 添加 `image_config` 参数支持
-- ✅ 支持精确控制分辨率（1K/2K/4K）和宽高比（5种）
-- ✅ 实测验证所有尺寸组合
-- ✅ 删除无效的完整配置节点（Full Config）
-- ✅ 简化节点命名（移除表情符号）
-- ✅ 更新文档和使用说明
+- 修复 Gemini 图片生成参数格式；改用 `/chat/completions` + `image_config`
 
 ### v1.0.0
 
 - 初始版本
-- 支持基础聊天和图片生成
 
 ## 参考资料
 

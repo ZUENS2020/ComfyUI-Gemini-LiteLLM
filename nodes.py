@@ -1,14 +1,14 @@
 """
-ComfyUI LLM Custom Nodes
-支持聊天对话和图片生成（OpenAI / Gemini 兼容）
+ComfyUI Gemini LiteLLM Nodes
+Gemini 3 聊天和图片生成（通过 LiteLLM）
 
 Architecture:
 - Execution Nodes: LLMChatGenerate, LLMImageGenerate
-- Config Nodes: LLMBaseConfig, ChatParams, OpenAIImageParams, GeminiImageParams
+- Config Nodes: LLMBaseConfig, ChatParams, GeminiImageParams
 - Zero external dependencies (urllib only)
 
 Author: ComfyUI Community
-Version: 2.0.0
+Version: 3.0.0
 Date: 2026-01-02
 """
 
@@ -137,7 +137,11 @@ class LLMImageGenerate:
                 "n": ("INT", {"default": 1, "min": 1, "max": 4}),
             },
             "optional": {
-                "image": ("IMAGE",),
+                "image_1": ("IMAGE",),
+                "image_2": ("IMAGE",),
+                "image_3": ("IMAGE",),
+                "image_4": ("IMAGE",),
+                "image_5": ("IMAGE",),
                 "additional_text": ("STRING", {"default": "", "multiline": True}),
             }
         }
@@ -146,16 +150,12 @@ class LLMImageGenerate:
     FUNCTION = "run"
     CATEGORY = "LLM"
 
-    def run(self, config, prompt, n, image=None, additional_text=""):
+    def run(self, config, prompt, n, image_1=None, image_2=None, image_3=None, image_4=None, image_5=None, additional_text=""):
         api_base = config.get("api_base")
         api_key = config.get("api_key")
         model = config.get("model")
         use_gemini_image = config.get("use_gemini_image", False)
         temperature = config.get("temperature", 1.0)
-        
-        # OpenAI 参数
-        size = config.get("size", "1024x1024")
-        quality = config.get("quality", "standard")
         
         # Gemini 参数
         aspect_ratio = config.get("aspect_ratio")
@@ -167,6 +167,18 @@ class LLMImageGenerate:
             return (self._err(),)
         
         try:
+            # 收集多路图像输入，合并为批次
+            image_inputs = [image_1, image_2, image_3, image_4, image_5]
+            image_list = []  # 允许不同尺寸，不再强制一致
+            for img in image_inputs:
+                if img is None:
+                    continue
+                if len(img.shape) == 3:
+                    image_list.append(img)
+                else:
+                    # 若是批次，逐张展开加入列表
+                    for i in range(img.shape[0]):
+                        image_list.append(img[i])
             if use_gemini_image and aspect_ratio and image_size:
                 # Gemini 图片生成 (使用 chat/completions 端点)
                 # 构建多模态消息内容
@@ -176,19 +188,18 @@ class LLMImageGenerate:
                 if prompt.strip():
                     content.append({"type": "text", "text": prompt})
                 
-                # 添加图像（如果有）
-                if image is not None:
-                    # 将 ComfyUI 的 IMAGE tensor 转换为 base64
-                    img_tensor = image[0] if len(image.shape) == 4 else image
-                    img_np = (img_tensor.cpu().numpy() * 255).astype(np.uint8)
-                    pil_img = Image.fromarray(img_np)
-                    buffered = BytesIO()
-                    pil_img.save(buffered, format="PNG")
-                    img_b64 = base64.b64encode(buffered.getvalue()).decode()
-                    content.append({
-                        "type": "image_url",
-                        "image_url": {"url": f"data:image/png;base64,{img_b64}"}
-                    })
+                # 添加图像（如果有，支持批量，尺寸可不同）
+                if image_list:
+                    for img_tensor in image_list:
+                        img_np = (img_tensor.cpu().numpy() * 255).astype(np.uint8)
+                        pil_img = Image.fromarray(img_np)
+                        buffered = BytesIO()
+                        pil_img.save(buffered, format="PNG")
+                        img_b64 = base64.b64encode(buffered.getvalue()).decode()
+                        content.append({
+                            "type": "image_url",
+                            "image_url": {"url": f"data:image/png;base64,{img_b64}"}
+                        })
                 
                 # 添加额外文本（如果有）
                 if additional_text.strip():
@@ -237,137 +248,8 @@ class LLMImageGenerate:
                 
                 if imgs:
                     return (torch.stack(imgs),)
-                    
             else:
-                # OpenAI 标准图片生成
-                if image is not None:
-                    # OpenAI 图片编辑模式（使用 /images/edits 端点）
-                    # 将 ComfyUI 的 IMAGE tensor 转换为 PNG 文件
-                    img_tensor = image[0] if len(image.shape) == 4 else image
-                    img_np = (img_tensor.cpu().numpy() * 255).astype(np.uint8)
-                    pil_img = Image.fromarray(img_np)
-                    
-                    # 转换为 RGBA（OpenAI edits 要求）
-                    if pil_img.mode != 'RGBA':
-                        pil_img = pil_img.convert('RGBA')
-                    
-                    # 保存到 BytesIO
-                    img_buffer = BytesIO()
-                    pil_img.save(img_buffer, format='PNG')
-                    img_buffer.seek(0)
-                    
-                    # 构建完整的提示词
-                    full_prompt = prompt
-                    if additional_text.strip():
-                        full_prompt = f"{prompt}\n{additional_text}"
-                    
-                    # 使用 multipart/form-data 格式
-                    import random
-                    import string
-                    boundary = '----WebKitFormBoundary' + ''.join(random.choices(string.ascii_letters + string.digits, k=16))
-                    
-                    # 构建 multipart body
-                    body_parts = []
-                    
-                    # 添加图片
-                    body_parts.append(f'--{boundary}'.encode())
-                    body_parts.append(b'Content-Disposition: form-data; name="image"; filename="image.png"')
-                    body_parts.append(b'Content-Type: image/png')
-                    body_parts.append(b'')
-                    body_parts.append(img_buffer.getvalue())
-                    
-                    # 添加 prompt
-                    body_parts.append(f'--{boundary}'.encode())
-                    body_parts.append(f'Content-Disposition: form-data; name="prompt"'.encode())
-                    body_parts.append(b'')
-                    body_parts.append(full_prompt.encode('utf-8'))
-                    
-                    # 添加 model
-                    body_parts.append(f'--{boundary}'.encode())
-                    body_parts.append(f'Content-Disposition: form-data; name="model"'.encode())
-                    body_parts.append(b'')
-                    body_parts.append(model.encode('utf-8'))
-                    
-                    # 添加 n
-                    body_parts.append(f'--{boundary}'.encode())
-                    body_parts.append(f'Content-Disposition: form-data; name="n"'.encode())
-                    body_parts.append(b'')
-                    body_parts.append(str(n).encode('utf-8'))
-                    
-                    # 添加 size
-                    body_parts.append(f'--{boundary}'.encode())
-                    body_parts.append(f'Content-Disposition: form-data; name="size"'.encode())
-                    body_parts.append(b'')
-                    body_parts.append(size.encode('utf-8'))
-                    
-                    # 添加 response_format
-                    body_parts.append(f'--{boundary}'.encode())
-                    body_parts.append(f'Content-Disposition: form-data; name="response_format"'.encode())
-                    body_parts.append(b'')
-                    body_parts.append(b'b64_json')
-                    
-                    body_parts.append(f'--{boundary}--'.encode())
-                    
-                    body = b'\r\n'.join(body_parts)
-                    
-                    # 发送请求
-                    headers = {
-                        "Authorization": f"Bearer {api_key.strip()}",
-                        "Content-Type": f"multipart/form-data; boundary={boundary}",
-                        "User-Agent": "ComfyUI"
-                    }
-                    
-                    req = urllib.request.Request(f"{base}/images/edits", body, headers, method="POST")
-                    try:
-                        with urllib.request.urlopen(req, timeout=180) as r:
-                            res = json.loads(r.read().decode())
-                    except urllib.error.HTTPError as e:
-                        try:
-                            err = e.read().decode()
-                        except:
-                            err = str(e.reason)
-                        raise Exception(f"HTTP {e.code}: {err}")
-                    except Exception as e:
-                        raise Exception(str(e))
-                else:
-                    # OpenAI 标准图片生成（无输入图像）
-                    full_prompt = prompt
-                    if additional_text.strip():
-                        full_prompt = f"{prompt}\n{additional_text}"
-                    
-                    payload = {
-                        "model": model,
-                        "prompt": full_prompt,
-                        "n": n,
-                        "size": size,
-                        "quality": quality,
-                        "response_format": "b64_json"
-                    }
-                    
-                    res = _request("POST", f"{base}/images/generations", _headers(api_key), payload, timeout=180)
-            if "error" in res:
-                raise Exception(res.get("error", {}).get("message", "image generation failed"))
-            if not res.get("data"):
-                raise Exception(f"empty response: {res}")
-            
-            imgs = []
-            for item in res.get("data", []):
-                data = None
-                if "b64_json" in item:
-                    data = base64.b64decode(item["b64_json"])
-                elif "url" in item:
-                    data = _download(item["url"])
-                
-                if data:
-                    pil = Image.open(BytesIO(data)).convert("RGB")
-                    arr = np.array(pil).astype(np.float32) / 255.0
-                    imgs.append(torch.from_numpy(arr))
-            
-            if imgs:
-                return (torch.stack(imgs),)
-            
-            _log("Image error: no decoded images")
-            return (self._err(),)
+                raise Exception("Gemini image_config required. Please use Gemini Image config node.")
         except Exception as e:
             _log(f"Image exception: {e}")
             return (self._err(),)
@@ -385,9 +267,9 @@ class LLMBaseConfig:
     def INPUT_TYPES(cls):
         return {
             "required": {
-                "api_base": ("STRING", {"default": "https://api.openai.com/v1"}),
+                "api_base": ("STRING", {"default": "https://your-litellm-server.com/v1"}),
                 "api_key": ("STRING", {"default": ""}),
-                "model": ("STRING", {"default": "gpt-3.5-turbo"}),
+                "model": ("STRING", {"default": "gemini/gemini-3-pro-image-preview"}),
             }
         }
     
@@ -430,32 +312,6 @@ class ChatParams:
         },)
 
 
-class OpenAIImageParams:
-    """OpenAI 图片参数配置"""
-    
-    @classmethod
-    def INPUT_TYPES(cls):
-        return {
-            "required": {
-                "base_config": ("LLM_BASE_CONFIG",),
-                "size": (["256x256", "512x512", "1024x1024", "1024x1792", "1792x1024"], {"default": "1024x1024"}),
-                "quality": (["standard", "hd"], {"default": "standard"}),
-            }
-        }
-    
-    RETURN_TYPES = ("LLM_IMAGE_CONFIG",)
-    RETURN_NAMES = ("config",)
-    FUNCTION = "run"
-    CATEGORY = "LLM/Config"
-    
-    def run(self, base_config, size, quality):
-        return ({
-            **base_config,
-            "size": size,
-            "quality": quality,
-        },)
-
-
 class GeminiImageParams:
     """Gemini 图片参数配置（LiteLLM v1.80.7+）
     使用 image_config 参数控制分辨率和宽高比
@@ -495,7 +351,6 @@ NODE_CLASS_MAPPINGS = {
     # 配置节点
     "LLMBaseConfig": LLMBaseConfig,
     "ChatParams": ChatParams,
-    "OpenAIImageParams": OpenAIImageParams,
     "GeminiImageParams": GeminiImageParams,
 }
 
@@ -507,6 +362,5 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     # 配置节点
     "LLMBaseConfig": "Base Config",
     "ChatParams": "Chat Params",
-    "OpenAIImageParams": "OpenAI Image",
     "GeminiImageParams": "Gemini Image",
 }
