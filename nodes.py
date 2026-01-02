@@ -130,7 +130,7 @@ class LLMChatGenerate:
         # 构建用户消息（支持多模态）
         user_content = []
         if prompt.strip():
-            user_content.append({"type": "text", "text": prompt})
+            user_content.append({"type": "text", "text": prompt.strip()})
         
         # 添加参考图像
         if image_list:
@@ -145,25 +145,33 @@ class LLMChatGenerate:
                     "image_url": {"url": f"data:image/png;base64,{img_b64}"}
                 })
         
-        # 如果没有内容，使用默认提示
+        # 如果没有内容，使用默认提示词（保持为列表格式）
         if not user_content:
-            user_content = "Hello"
+            user_content = [{"type": "text", "text": "Hello"}]
         
         msgs.append({"role": "user", "content": user_content})
         
-        try:
-            payload = {
-                "model": model,
-                "messages": msgs,
-                "temperature": temperature,
-                "max_tokens": max_tokens
-            }
-            res = _request("POST", f"{base}/chat/completions", _headers(api_key), payload)
-            txt = res.get("choices", [{}])[0].get("message", {}).get("content", "")
-            return (txt or "No response",)
-        except Exception as e:
-            _log(f"Chat exception: {e}")
-            return (f"Error: {e}",)
+        # 重试机制
+        max_retries = 2
+        for attempt in range(max_retries):
+            try:
+                payload = {
+                    "model": model,
+                    "messages": msgs,
+                    "temperature": temperature,
+                    "max_tokens": max_tokens
+                }
+                res = _request("POST", f"{base}/chat/completions", _headers(api_key), payload, timeout=120)
+                txt = res.get("choices", [{}])[0].get("message", {}).get("content", "")
+                if txt:
+                    return (txt,)
+                return ("No response from model",)
+            except Exception as e:
+                if attempt == max_retries - 1:
+                    _log(f"Chat error (final): {e}")
+                    raise Exception(f"Failed to get response after {max_retries} attempts: {e}")
+                else:
+                    _log(f"Chat retry {attempt + 1}/{max_retries} due to: {e}")
 
 
 class LLMImageGenerate:
@@ -205,98 +213,95 @@ class LLMImageGenerate:
         base = _normalize_url(api_base)
         if not base or not api_key or not model:
             _log("Image error: missing base/key/model")
-            return (self._err(),)
+            raise Exception("Missing API configuration")
         
-        try:
-            # 收集多路图像输入，合并为批次
-            image_inputs = [image_1, image_2, image_3, image_4, image_5]
-            image_list = []  # 允许不同尺寸，不再强制一致
-            for img in image_inputs:
-                if img is None:
-                    continue
-                if len(img.shape) == 3:
-                    image_list.append(img)
-                else:
-                    # 若是批次，逐张展开加入列表
-                    for i in range(img.shape[0]):
-                        image_list.append(img[i])
-            if use_gemini_image and aspect_ratio and image_size:
-                # Gemini 图片生成 (使用 chat/completions 端点)
-                # 构建多模态消息内容
-                content = []
-                
-                # 添加主提示词
-                if prompt.strip():
-                    content.append({"type": "text", "text": prompt})
-                
-                # 添加图像（如果有，支持批量，尺寸可不同）
-                if image_list:
-                    for img_tensor in image_list:
-                        img_np = (img_tensor.cpu().numpy() * 255).astype(np.uint8)
-                        pil_img = Image.fromarray(img_np)
-                        buffered = BytesIO()
-                        pil_img.save(buffered, format="PNG")
-                        img_b64 = base64.b64encode(buffered.getvalue()).decode()
-                        content.append({
-                            "type": "image_url",
-                            "image_url": {"url": f"data:image/png;base64,{img_b64}"}
-                        })
-                
-                # 添加额外文本（如果有）
-                if additional_text.strip():
-                    content.append({"type": "text", "text": additional_text})
-                
-                # 如果没有任何内容，使用默认提示
-                if not content:
-                    content = "Generate an image"
-                
-                payload = {
-                    "model": model,
-                    "messages": [{"role": "user", "content": content}],
-                    "temperature": temperature,
-                    "image_config": {
-                        "image_size": image_size,
-                        "aspect_ratio": aspect_ratio
+        # 重试机制
+        max_retries = 2
+        for attempt in range(max_retries):
+            try:
+                if use_gemini_image and aspect_ratio and image_size:
+                    # 收集多路图像输入
+                    image_inputs = [image_1, image_2, image_3, image_4, image_5]
+                    image_list = []
+                    for img in image_inputs:
+                        if img is None:
+                            continue
+                        if len(img.shape) == 3:
+                            image_list.append(img)
+                        else:
+                            for i in range(img.shape[0]):
+                                image_list.append(img[i])
+                    
+                    # 构建多模态消息内容
+                    content = []
+                    if prompt.strip():
+                        content.append({"type": "text", "text": prompt.strip()})
+                    
+                    if image_list:
+                        for img_tensor in image_list:
+                            img_np = (img_tensor.cpu().numpy() * 255).astype(np.uint8)
+                            pil_img = Image.fromarray(img_np)
+                            buffered = BytesIO()
+                            pil_img.save(buffered, format="PNG")
+                            img_b64 = base64.b64encode(buffered.getvalue()).decode()
+                            content.append({
+                                "type": "image_url",
+                                "image_url": {"url": f"data:image/png;base64,{img_b64}"}
+                            })
+                    
+                    if additional_text.strip():
+                        content.append({"type": "text", "text": additional_text.strip()})
+                    
+                    # 如果没有内容，使用默认提示词（保持为列表格式）
+                    if not content:
+                        content = [{"type": "text", "text": "Generate a beautiful landscape"}]
+                    
+                    payload = {
+                        "model": model,
+                        "messages": [{"role": "user", "content": content}],
+                        "temperature": temperature,
+                        "image_config": {
+                            "image_size": image_size,
+                            "aspect_ratio": aspect_ratio
+                        }
                     }
-                }
-                
-                res = _request("POST", f"{base}/chat/completions", _headers(api_key), payload, timeout=180)
-                
-                if "error" in res:
-                    raise Exception(res.get("error", {}).get("message", "image generation failed"))
-                if not res.get("choices"):
-                    raise Exception(f"empty response: {res}")
-                
-                # 提取图片数据
-                imgs = []
-                message = res["choices"][0].get("message", {})
-                images = message.get("images", [])
-                
-                # 检查是否返回了文本而不是图片
-                if not images and message.get("content"):
-                    _log(f"Image error: Gemini returned text instead of image. Content preview: {message['content'][:200]}...")
-                    raise Exception("Gemini returned text response instead of image. Try using a simpler, more direct image description prompt.")
-                
-                for img_item in images:
-                    img_url = img_item.get("image_url", {}).get("url", "")
-                    if img_url.startswith("data:image/"):
-                        # 解析 data URL: data:image/jpeg;base64,xxxxx
-                        b64_data = img_url.split(",", 1)[1] if "," in img_url else img_url
-                        data = base64.b64decode(b64_data)
-                        pil = Image.open(BytesIO(data)).convert("RGB")
-                        arr = np.array(pil).astype(np.float32) / 255.0
-                        imgs.append(torch.from_numpy(arr))
-                
-                if imgs:
-                    return (torch.stack(imgs),)
-            else:
-                raise Exception("Gemini image_config required. Please use Gemini Image config node.")
-        except Exception as e:
-            _log(f"Image exception: {e}")
-            return (self._err(),)
-    
-    def _err(self):
-        return torch.from_numpy(np.zeros((512, 512, 3), dtype=np.float32)).unsqueeze(0)
+                    
+                    res = _request("POST", f"{base}/chat/completions", _headers(api_key), payload, timeout=180)
+                    
+                    if "error" in res:
+                        raise Exception(res.get("error", {}).get("message", "image generation failed"))
+                    if not res.get("choices"):
+                        raise Exception(f"empty response: {res}")
+                    
+                    imgs = []
+                    message = res["choices"][0].get("message", {})
+                    images = message.get("images", [])
+                    
+                    if not images and message.get("content"):
+                        raise Exception("Gemini returned text instead of image. Use simpler image description.")
+                    
+                    for img_item in images:
+                        img_url = img_item.get("image_url", {}).get("url", "")
+                        if img_url.startswith("data:image/"):
+                            b64_data = img_url.split(",", 1)[1] if "," in img_url else img_url
+                            data = base64.b64decode(b64_data)
+                            pil = Image.open(BytesIO(data)).convert("RGB")
+                            arr = np.array(pil).astype(np.float32) / 255.0
+                            imgs.append(torch.from_numpy(arr))
+                    
+                    if imgs:
+                        result = torch.stack(imgs)
+                        for _ in range(n - 1):
+                            result = torch.cat([result, result[:1]], dim=0)
+                        return (result,)
+                else:
+                    raise Exception("Gemini config required")
+            except Exception as e:
+                if attempt == max_retries - 1:
+                    _log(f"Image error (final): {e}")
+                    raise Exception(f"Image generation failed after {max_retries} attempts: {e}")
+                else:
+                    _log(f"Image retry {attempt + 1}/{max_retries} due to: {e}")
 
 
 # ============ 配置节点 ============
