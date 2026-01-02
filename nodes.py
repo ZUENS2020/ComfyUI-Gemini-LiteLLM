@@ -189,7 +189,7 @@ class LLMImageGenerate:
     
     RETURN_TYPES = ("IMAGE",)
     FUNCTION = "run"
-    CATEGORY = "Gemini"
+    CATEGORY = "Gemini-LiteLLM"
 
     def run(self, config, prompt, n, image_1=None, image_2=None, image_3=None, image_4=None, image_5=None, additional_text=""):
         api_base = config.get("api_base")
@@ -317,7 +317,7 @@ class LLMBaseConfig:
     RETURN_TYPES = ("LLM_BASE_CONFIG",)
     RETURN_NAMES = ("base_config",)
     FUNCTION = "run"
-    CATEGORY = "Gemini/Config"
+    CATEGORY = "Gemini-LiteLLM/Config"
     
     def run(self, api_base, api_key, model):
         return ({
@@ -343,7 +343,7 @@ class ChatParams:
     RETURN_TYPES = ("LLM_CHAT_CONFIG",)
     RETURN_NAMES = ("config",)
     FUNCTION = "run"
-    CATEGORY = "Gemini/Config"
+    CATEGORY = "Gemini-LiteLLM/Config"
     
     def run(self, base_config, temperature, max_tokens):
         return ({
@@ -372,7 +372,7 @@ class GeminiImageParams:
     RETURN_TYPES = ("LLM_IMAGE_CONFIG",)
     RETURN_NAMES = ("config",)
     FUNCTION = "run"
-    CATEGORY = "Gemini/Config"
+    CATEGORY = "Gemini-LiteLLM/Config"
     
     def run(self, base_config, aspect_ratio, image_size, temperature):
         return ({
@@ -403,5 +403,5 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     # 配置节点
     "LLMBaseConfig": "Base Config",
     "ChatParams": "Chat Params",
-    "GeminiImageParams": "Gemini Image",
+    "GeminiImageParams": "Image Params",
 }
