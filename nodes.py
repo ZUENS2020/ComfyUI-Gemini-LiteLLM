@@ -86,14 +86,19 @@ class LLMChatGenerate:
             },
             "optional": {
                 "system": ("STRING", {"default": "", "multiline": True}),
+                "image_1": ("IMAGE",),
+                "image_2": ("IMAGE",),
+                "image_3": ("IMAGE",),
+                "image_4": ("IMAGE",),
+                "image_5": ("IMAGE",),
             }
         }
     
     RETURN_TYPES = ("STRING",)
     FUNCTION = "run"
-    CATEGORY = "LLM"
+    CATEGORY = "Gemini-LiteLLM"
 
-    def run(self, config, prompt, system=""):
+    def run(self, config, prompt, system="", image_1=None, image_2=None, image_3=None, image_4=None, image_5=None):
         api_base = config.get("api_base")
         api_key = config.get("api_key")
         model = config.get("model")
@@ -105,10 +110,46 @@ class LLMChatGenerate:
             _log("Chat error: missing base/key/model")
             return ("Error: Missing parameters",)
         
+        # 收集多路图像输入
+        image_inputs = [image_1, image_2, image_3, image_4, image_5]
+        image_list = []
+        for img in image_inputs:
+            if img is None:
+                continue
+            if len(img.shape) == 3:
+                image_list.append(img)
+            else:
+                # 若是批次，逐张展开加入列表
+                for i in range(img.shape[0]):
+                    image_list.append(img[i])
+        
         msgs = []
         if system.strip():
             msgs.append({"role": "system", "content": system.strip()})
-        msgs.append({"role": "user", "content": prompt})
+        
+        # 构建用户消息（支持多模态）
+        user_content = []
+        if prompt.strip():
+            user_content.append({"type": "text", "text": prompt})
+        
+        # 添加参考图像
+        if image_list:
+            for img_tensor in image_list:
+                img_np = (img_tensor.cpu().numpy() * 255).astype(np.uint8)
+                pil_img = Image.fromarray(img_np)
+                buffered = BytesIO()
+                pil_img.save(buffered, format="PNG")
+                img_b64 = base64.b64encode(buffered.getvalue()).decode()
+                user_content.append({
+                    "type": "image_url",
+                    "image_url": {"url": f"data:image/png;base64,{img_b64}"}
+                })
+        
+        # 如果没有内容，使用默认提示
+        if not user_content:
+            user_content = "Hello"
+        
+        msgs.append({"role": "user", "content": user_content})
         
         try:
             payload = {
@@ -148,7 +189,7 @@ class LLMImageGenerate:
     
     RETURN_TYPES = ("IMAGE",)
     FUNCTION = "run"
-    CATEGORY = "LLM"
+    CATEGORY = "Gemini"
 
     def run(self, config, prompt, n, image_1=None, image_2=None, image_3=None, image_4=None, image_5=None, additional_text=""):
         api_base = config.get("api_base")
@@ -276,7 +317,7 @@ class LLMBaseConfig:
     RETURN_TYPES = ("LLM_BASE_CONFIG",)
     RETURN_NAMES = ("base_config",)
     FUNCTION = "run"
-    CATEGORY = "LLM/Config"
+    CATEGORY = "Gemini/Config"
     
     def run(self, api_base, api_key, model):
         return ({
@@ -302,7 +343,7 @@ class ChatParams:
     RETURN_TYPES = ("LLM_CHAT_CONFIG",)
     RETURN_NAMES = ("config",)
     FUNCTION = "run"
-    CATEGORY = "LLM/Config"
+    CATEGORY = "Gemini/Config"
     
     def run(self, base_config, temperature, max_tokens):
         return ({
@@ -331,7 +372,7 @@ class GeminiImageParams:
     RETURN_TYPES = ("LLM_IMAGE_CONFIG",)
     RETURN_NAMES = ("config",)
     FUNCTION = "run"
-    CATEGORY = "LLM/Config"
+    CATEGORY = "Gemini/Config"
     
     def run(self, base_config, aspect_ratio, image_size, temperature):
         return ({
